@@ -8,7 +8,7 @@ const API_KEY = process.env.API_KEY;
 app.use(cors());
 app.use(express.json({ limit: '1mb' }));
 
-// ═══════ تخزين البيانات ═══════
+// ═══════ تخزين البيانات في Vercel Blob ═══════
 const BLOB_PATH = 'hero-hub-data.json';
 
 async function loadDB() {
@@ -46,7 +46,7 @@ function checkAuth(req, res, next) {
     next();
 }
 
-// ═══════ استقبال البيانات من السكربت ═══════
+// ═══════ استقبال بيانات من السكربت ═══════
 app.post('/api/player/stats', checkAuth, async (req, res) => {
     const data = req.body;
     if (!data || !data.userId) {
@@ -71,7 +71,7 @@ app.post('/api/player/stats', checkAuth, async (req, res) => {
     res.json({ ok: true });
 });
 
-// ═══════ إرجاع كل الحسابات ═══════
+// ═══════ إرجاع كل الحسابات للـ Dashboard ═══════
 app.get('/api/players', async (req, res) => {
     const database = await loadDB();
     const list = Object.values(database).map(p => ({
@@ -80,6 +80,95 @@ app.get('/api/players', async (req, res) => {
     }));
     list.sort((a, b) => b.lastSeen - a.lastSeen);
     res.json(list);
+});
+
+// ═══════ الـ Dashboard HTML (مدمج جوه السيرفر) ═══════
+const DASHBOARD_HTML = `<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<title>Hero Hub Tracker</title>
+<style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #0a0a0c; color: #e8e8ec; font-family: 'Segoe UI', Tahoma, sans-serif; padding: 24px; min-height: 100vh; }
+    header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid #222; }
+    h1 { font-size: 22px; font-weight: 700; }
+    h1 span { color: #ff4444; }
+    .status { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #888; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: #22c55e; box-shadow: 0 0 8px #22c55e; }
+    .dot.off { background: #444; box-shadow: none; }
+    .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 24px; }
+    .stat { background: #131316; border: 1px solid #1e1e22; border-radius: 10px; padding: 14px 16px; }
+    .stat .label { font-size: 11px; color: #777; text-transform: uppercase; margin-bottom: 6px; }
+    .stat .value { font-size: 20px; font-weight: 700; }
+    .stat .value.green { color: #22c55e; }
+    .stat .value.gold { color: #fbbf24; }
+    table { width: 100%; border-collapse: collapse; background: #131316; border-radius: 12px; overflow: hidden; border: 1px solid #1e1e22; }
+    thead { background: #1a1a1f; }
+    th { padding: 12px 14px; text-align: right; font-size: 12px; color: #888; text-transform: uppercase; }
+    td { padding: 12px 14px; font-size: 13px; border-top: 1px solid #1e1e22; }
+    tr:hover td { background: #1a1a1f; }
+    .cash { color: #22c55e; font-weight: 600; }
+    .bank { color: #fbbf24; font-weight: 600; }
+    .level { color: #60a5fa; font-weight: 600; }
+    .vehicles { font-size: 12px; color: #aaa; }
+    .empty { text-align: center; padding: 60px 20px; color: #555; }
+</style>
+</head>
+<body>
+<header>
+    <h1>HERO HUB <span>TRACKER</span></h1>
+    <div class="status">
+        <span class="dot" id="dot"></span>
+        <span id="statusText">Connecting...</span>
+    </div>
+</header>
+<div class="stats">
+    <div class="stat"><div class="label">Total Players</div><div class="value" id="sTotal">0</div></div>
+    <div class="stat"><div class="label">Online Now</div><div class="value green" id="sOnline">0</div></div>
+    <div class="stat"><div class="label">Total Cash</div><div class="value green" id="sCash">$0</div></div>
+    <div class="stat"><div class="label">Total Bank</div><div class="value gold" id="sBank">$0</div></div>
+</div>
+<table>
+    <thead><tr><th>Status</th><th>Username</th><th>Level</th><th>Cash</th><th>Bank</th><th>Vehicles</th></tr></thead>
+    <tbody id="tableBody"><tr><td colspan="6" class="empty">Loading...</td></tr></tbody>
+</table>
+<script>
+const API = window.location.origin;
+function fmt(n) { return '$' + Number(n || 0).toLocaleString('en-US'); }
+function update() {
+    fetch(API + '/api/players').then(r => r.json()).then(players => {
+        document.getElementById('sTotal').textContent = players.length;
+        document.getElementById('sOnline').textContent = players.filter(p => p.online).length;
+        document.getElementById('sCash').textContent = fmt(players.reduce((a,p) => a + (p.cash||0), 0));
+        document.getElementById('sBank').textContent = fmt(players.reduce((a,p) => a + (p.bank||0), 0));
+        const online = players.filter(p => p.online).length;
+        document.getElementById('dot').className = 'dot' + (online > 0 ? '' : ' off');
+        document.getElementById('statusText').textContent = online + ' online / ' + players.length + ' total';
+        const tbody = document.getElementById('tableBody');
+        if (players.length === 0) { tbody.innerHTML = '<tr><td colspan="6" class="empty">No players yet</td></tr>'; return; }
+        tbody.innerHTML = players.map(p => '<tr>' +
+            '<td><span class="dot ' + (p.online ? '' : 'off') + '"></span> ' + (p.online ? 'Online' : 'Offline') + '</td>' +
+            '<td><strong>' + p.username + '</strong></td>' +
+            '<td class="level">' + p.level + '</td>' +
+            '<td class="cash">' + fmt(p.cash) + '</td>' +
+            '<td class="bank">' + fmt(p.bank) + '</td>' +
+            '<td class="vehicles">' + ((p.vehicles||[]).join(', ') || '—') + '</td>' +
+        '</tr>').join('');
+    }).catch(() => { document.getElementById('dot').className = 'dot off'; document.getElementById('statusText').textContent = 'Connection lost'; });
+}
+update();
+setInterval(update, 5000);
+</script>
+</body>
+</html>`;
+
+app.get('*', (req, res) => {
+    if (req.path.startsWith('/api/')) {
+        return res.status(404).json({ error: 'API route not found' });
+    }
+    res.setHeader('Content-Type', 'text/html');
+    res.send(DASHBOARD_HTML);
 });
 
 module.exports = app;
